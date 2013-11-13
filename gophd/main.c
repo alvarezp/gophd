@@ -1,13 +1,14 @@
 #include <stdlib.h>
 #include <stdio.h>
-
 #include <string.h>
 #include <errno.h>
 #include <syslog.h>
 #include <dirent.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <unistd.h>
+
 #include "utils.h"
 #include "types.h"
 #include "server.h"
@@ -18,13 +19,17 @@
 #define LF 10
 #define DEFAULT_HOST "localhost"
 #define DEFAULT_PORT 70
-#define GOPHER_ROOT "/Users/louis77"
+#define GOPHER_ROOT "/Users/louis77/"
 
-void send_menu_item(int fd, menu_item * item);
-void write_int(int fd, const unsigned int *num);
+char * resolve_selector( char * filepath, const char * selector );
+int is_menu(const char * selector);
+int is_file(const char * selector);
+int is_dir(const char * selector);
+void print_menu_item(int fd, menu_item * item);
 void print_directory(int fd, const char * dirname);
 void print_textfile(int fd, const char * filename);
 void print_message(int fd, const char * message);
+void print_closing(int fd);
 void print_nl(int fd);
 void main_shutdown();
 
@@ -64,15 +69,26 @@ int main(int argc, const char * argv[])
             }
         }
         
-        plog("Request: %s", buf);
-
+        char * selector = resolve_selector(NULL, buf);
+        plog("Request: %s, resolved: %s", buf, selector);
+        
         // this is for development only
         if(strcmp(buf, "/exit") == 0)
             break;
 
-        print_message(accept_fd, "Welcome to Gophd!");
-        print_directory(accept_fd, GOPHER_ROOT);
-        //print_textfile(accept_fd, "/Users/louis77/delme.rb");
+        if( is_menu(selector) ) {
+            plog("Sending menu");
+            print_message(accept_fd, "Welcome to Gophd!");
+            print_directory(accept_fd, GOPHER_ROOT);
+        } else if ( is_file(selector) ) {
+            plog("Sending file");
+            print_textfile(accept_fd, selector);
+        } else if ( is_dir(selector) ) {
+            plog("Sending dir");
+            print_directory(accept_fd, selector);
+        }
+
+        free(selector);
         close_socket(accept_fd, 1);
         
     }
@@ -88,33 +104,54 @@ int main(int argc, const char * argv[])
 }
 
 
+/** Resolve selector string to Filesystem path
+ *  Uses GOPHER_ROOT as base directory
+ *
+ *  Input parameter:    char * filepath , IFNULL will be alloc'd
+ *                      const char * selector
+ *  Return value:       char * filepath
+ * 
+ *  You must free() filepath after usage
+ */
+
+char * resolve_selector( char * filepath, const char * selector ){
+    size_t len = strlen(GOPHER_ROOT) + strlen(selector) + 3;  // two more bytes for slashes and \0
+    if( filepath == NULL ) filepath = malloc(len);
+    
+    unsigned int start_at = 0;
+    if( selector[0] == '/' ) start_at = 1;
+    asprintf(&filepath, "%s%s", GOPHER_ROOT, selector+start_at);
+    return filepath;
+}
+
+
+int is_menu(const char * selector){
+    if( strcmp(selector, GOPHER_ROOT) == 0 ) return 1;
+    return 0;
+}
+
+int is_file(const char * selector){
+    struct stat * fstat = malloc(sizeof(struct stat));
+    int success = 0;
+    success = stat(selector, fstat) == 0 && S_ISREG(fstat->st_mode);
+    free(fstat);
+    return success;
+}
+
+int is_dir(const char * selector){
+    struct stat * fstat = malloc(sizeof(struct stat));
+    int success = 0;
+    success = stat(selector, fstat) == 0 && S_ISDIR(fstat->st_mode);
+    free(fstat);
+    return success;
+}
 
 /** Send stub menu
  */
 
-void send_menu_item(int fd, menu_item * item){
-    write(fd, &item->type, sizeof(item->type));
-    write(fd, item->display, strlen(item->display));
-    write(fd, &item->delimiter, 1);
-    write(fd, item->selector, strlen(item->selector));
-    write(fd, &item->delimiter, 1);
-    write(fd, item->host, strlen(item->host));
-    write(fd, &item->delimiter, 1);
-    write_int(fd, &item->port);
+void print_menu_item(int fd, menu_item * item){
+    dprintf(fd, "%c%s\t%s\t%s\t%d", item->type, item->display, item->selector, item->host, item->port);
     print_nl(fd);
-}
-
-
-/** Convert an integer to a string
- *
- *
- */
-
-void write_int(int fd, const unsigned int *num){
-    char * buf;
-    asprintf(&buf, "%d", *num);
-    write(fd, buf, strlen(buf));
-    free(buf);
 }
 
 
@@ -133,7 +170,7 @@ void print_directory(int fd, const char * dirname){
     }
     
     while( (entry = readdir(dir)) != NULL ){
-        if( (*entry).d_name[0] == '.' ) continue;
+        if( (*entry).d_name[0] == '.' ) continue; // don't print hidden files/dirs
             
         char type;
         switch( entry->d_type ){
@@ -146,13 +183,12 @@ void print_directory(int fd, const char * dirname){
         asprintf(&selector, "/%s", entry->d_name);
         
         menu_item * item = menu_item_new(type, entry->d_name, selector, DEFAULT_HOST, DEFAULT_PORT);
-        send_menu_item(fd, item);
+        print_menu_item(fd, item);
         menu_item_free(item);
         
     }
     
-    write(fd, ".", 3);
-    print_nl(fd);
+    print_closing(fd);
     if( closedir(dir) != 0 )
         perror(NULL);
 }
@@ -179,14 +215,18 @@ void print_textfile(int fd, const char * filename){
   */
 
 void print_message(int fd, const char * message){
-    write(fd, "i", 1);
-    write(fd, message, strlen(message));
+    dprintf(fd, "i%s", message);
     print_nl(fd);
 }
 
 
 void print_nl(int fd){
     write(fd, "\r\n", 2);
+}
+
+void print_closing(int fd){
+    write(fd, ".", 1);
+    print_nl(fd);
 }
 
 /** Terminate the program by releasing all resources
