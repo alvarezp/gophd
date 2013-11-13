@@ -5,6 +5,6 @@
         fprintf(stderr, __VA_ARGS__);   \
         fprintf(stderr, "\n");
 
-//void plog(const char * msg);
+int str_ends_with(const char * str, const char * ending);
 
 #endif

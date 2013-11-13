@@ -1,7 +1,7 @@
 #ifndef gophd_types_h
 #define gophd_types_h
 
-enum item_types { ITEM_FILE='0', ITEM_DIR='1', ERROR='3', ITEM_BINARY='9', ITEM_IMAGE='I', ITEM_INFO='i' };
+enum item_types { ITEM_FILE='0', ITEM_DIR='1', ERROR='3', ITEM_ARCHIVE='5', ITEM_BINARY='9', ITEM_IMAGE='I', ITEM_INFO='i', NO_ITEM=0 };
 
 
 struct menu_item {
@@ -14,6 +14,7 @@ struct menu_item {
 };
 
 typedef struct menu_item menu_item;
+typedef char t_item;
 
 struct menu_item * menu_item_new(const char type, const char * display, char * selector, const char * host, unsigned int port);
 void menu_item_free(menu_item * item);

@@ -17,20 +17,21 @@
 #define LISTEN_PORT 70
 #define BUFFER_SIZE 1024
 #define LF 10
+#define CRLF "\r\n"
 #define DEFAULT_HOST "localhost"
 #define DEFAULT_PORT 70
 #define GOPHER_ROOT "/Users/louis77/"
 
 char * resolve_selector( char * filepath, const char * selector );
+enum item_types resolve_item(struct dirent * entry);
 int is_menu(const char * selector);
 int is_file(const char * selector);
 int is_dir(const char * selector);
 void print_menu_item(int fd, menu_item * item);
 void print_directory(int fd, const char * dirname);
-void print_textfile(int fd, const char * filename);
+void print_file(int fd, const char * filename);
 void print_message(int fd, const char * message);
 void print_closing(int fd);
-void print_nl(int fd);
 void main_shutdown();
 
 int main(int argc, const char * argv[])
@@ -68,27 +69,25 @@ int main(int argc, const char * argv[])
                 break;
             }
         }
-        
-        char * selector = resolve_selector(NULL, buf);
-        plog("Request: %s, resolved: %s", buf, selector);
+
+        plog("Request: %s", buf);
         
         // this is for development only
         if(strcmp(buf, "/exit") == 0)
             break;
 
-        if( is_menu(selector) ) {
+        if( is_menu(buf) ) {
             plog("Sending menu");
             print_message(accept_fd, "Welcome to Gophd!");
-            print_directory(accept_fd, GOPHER_ROOT);
-        } else if ( is_file(selector) ) {
+            print_directory(accept_fd, buf);
+        } else if ( is_file(buf) ) {
             plog("Sending file");
-            print_textfile(accept_fd, selector);
-        } else if ( is_dir(selector) ) {
+            print_file(accept_fd, buf);
+        } else if ( is_dir(buf) ) {
             plog("Sending dir");
-            print_directory(accept_fd, selector);
+            print_directory(accept_fd, buf);
         }
 
-        free(selector);
         close_socket(accept_fd, 1);
         
     }
@@ -125,24 +124,29 @@ char * resolve_selector( char * filepath, const char * selector ){
 }
 
 
+
+
 int is_menu(const char * selector){
-    if( strcmp(selector, GOPHER_ROOT) == 0 ) return 1;
+    if( strlen(selector) == 0 ) return 1;
     return 0;
 }
 
 int is_file(const char * selector){
+    char * path = resolve_selector(NULL, selector);
     struct stat * fstat = malloc(sizeof(struct stat));
-    int success = 0;
-    success = stat(selector, fstat) == 0 && S_ISREG(fstat->st_mode);
+    int success = stat(path, fstat) == 0 && S_ISREG(fstat->st_mode);
     free(fstat);
+    free(path);
     return success;
 }
 
 int is_dir(const char * selector){
+    char * path = resolve_selector(NULL, selector);
     struct stat * fstat = malloc(sizeof(struct stat));
     int success = 0;
-    success = stat(selector, fstat) == 0 && S_ISDIR(fstat->st_mode);
+    success = stat(path, fstat) == 0 && S_ISDIR(fstat->st_mode);
     free(fstat);
+    free(path);
     return success;
 }
 
@@ -150,17 +154,33 @@ int is_dir(const char * selector){
  */
 
 void print_menu_item(int fd, menu_item * item){
-    dprintf(fd, "%c%s\t%s\t%s\t%d", item->type, item->display, item->selector, item->host, item->port);
-    print_nl(fd);
+    dprintf(fd, "%c%s\t%s\t%s\t%d%s", item->type, item->display, item->selector, item->host, item->port, CRLF);
 }
 
+
+enum item_types resolve_item(struct dirent * entry){
+    enum item_types type;
+    switch( entry->d_type ){
+        case DT_REG:
+            if( str_ends_with(entry->d_name, ".zip") ) {
+                type = ITEM_ARCHIVE;
+            } else {
+                type = ITEM_FILE; // text file?
+            }
+            break;
+        case DT_DIR: type = ITEM_DIR; break;
+        default: type = NO_ITEM;
+    }
+    return type;
+}
 
 /** Read directory items
  *  and return array of dirents
  * 
  */
 
-void print_directory(int fd, const char * dirname){
+void print_directory(int fd, const char * selector){
+    char * dirname = resolve_selector(NULL, selector);
     DIR * dir = opendir(dirname);
     struct dirent * entry = NULL;
     
@@ -172,17 +192,12 @@ void print_directory(int fd, const char * dirname){
     while( (entry = readdir(dir)) != NULL ){
         if( (*entry).d_name[0] == '.' ) continue; // don't print hidden files/dirs
             
-        char type;
-        switch( entry->d_type ){
-            case DT_REG: type = ITEM_FILE; break;
-            case DT_DIR: type = ITEM_DIR; break;
-            default: continue; // don't send item if not either file or dir
-        }
+        char type = resolve_item(entry);
         
-        char *selector;
-        asprintf(&selector, "/%s", entry->d_name);
+        char *sel;
+        asprintf(&sel, "%s/%s", selector, entry->d_name);
         
-        menu_item * item = menu_item_new(type, entry->d_name, selector, DEFAULT_HOST, DEFAULT_PORT);
+        menu_item * item = menu_item_new(type, entry->d_name, sel, DEFAULT_HOST, DEFAULT_PORT);
         print_menu_item(fd, item);
         menu_item_free(item);
         
@@ -191,23 +206,32 @@ void print_directory(int fd, const char * dirname){
     print_closing(fd);
     if( closedir(dir) != 0 )
         perror(NULL);
+    free(dirname);
 }
 
 /** Read a file and print it line by line to the server
+ *  This functions read the while file at once ... we should do that block by block
  */
 
-void print_textfile(int fd, const char * filename){
-    FILE * file = fopen(filename, "r");
-    if (file == NULL) return;
+void print_file(int fd, const char * selector){
+    char * filename = resolve_selector(NULL, selector);
+    FILE * file = fopen(filename, "rb");
     
-    size_t bufsize = BUFFER_SIZE;
-    char *lineptr = malloc(bufsize);
-    ssize_t retsize = 0;
-    while ((retsize = getline(&lineptr, &bufsize, file)) != -1) {
-        write(fd, lineptr, retsize);
+    if (file != NULL) {
+        fseek(file, 0L, SEEK_END);     /* Position to end of file */
+        long file_len = ftell(file);        /* Get file length */
+        rewind(file);
+        
+        char * lineptr = malloc(file_len);
+        if (fread(lineptr, file_len, 1, file) == 1) {
+            write(fd, lineptr, file_len);
+        }
+    
+        perror(NULL);
+        free(lineptr);
+        fclose(file);
     }
-    free(lineptr);
-    fclose(file);
+    free(filename);
 }
 
 
@@ -215,18 +239,12 @@ void print_textfile(int fd, const char * filename){
   */
 
 void print_message(int fd, const char * message){
-    dprintf(fd, "i%s", message);
-    print_nl(fd);
+    dprintf(fd, "i%s%s", message, CRLF);
 }
 
-
-void print_nl(int fd){
-    write(fd, "\r\n", 2);
-}
 
 void print_closing(int fd){
-    write(fd, ".", 1);
-    print_nl(fd);
+    dprintf(fd, ".%s", CRLF);
 }
 
 /** Terminate the program by releasing all resources
