@@ -13,6 +13,14 @@ struct menu_item {
     char delimiter;
 };
 
+struct request_t {
+    int fd;
+    char * selector;
+    size_t selector_len;
+    char * path;
+    size_t path_len;
+};
+
 typedef struct menu_item menu_item;
 typedef char t_item;
 

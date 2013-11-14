@@ -26,46 +26,40 @@
 
 char * resolve_selector( char * filepath, const char * selector );
 enum item_types resolve_item(struct dirent * entry);
-int is_menu(const char * selector);
-int is_file(const char * selector);
-int is_dir(const char * selector);
+int is_menu(struct request_t * req);
+int is_file(struct request_t * req);
+int is_dir(struct request_t * req);
 void print_menu_item(int fd, menu_item * item);
-void print_directory(int fd, const char * dirname);
-void print_file(int fd, const char * filename);
+void print_directory(struct request_t * req);
+void print_file(struct request_t * req);
 void print_message(int fd, const char * message);
 void print_closing(int fd);
 void main_shutdown();
 void * handle_request(void * args);
 
-struct request_t {
-    int fd;
-};
-
 int main(int argc, const char * argv[])
 {
     plog("Starting gophd...");
-    int fd = 0;
+    int fd;
     if( (fd = start_server( LISTEN_PORT, CONNECTION_QUEUE )) < 0 ){
         perror(NULL);
         abort();
     }
     
     // Accept connections, blocking
-    int accept_fd = 0;
+    int accept_fd;
     struct sockaddr *addr = NULL;
     socklen_t *length_ptr = NULL;
     
     atexit(&main_shutdown);
     
     while( (accept_fd = accept(fd, addr, length_ptr)) != -1 ) {
+        int * req_fd = malloc(sizeof(int));
+        *req_fd = accept_fd;
         pthread_t thread;
-        struct request_t * req = malloc(sizeof(struct request_t));
-        req->fd = accept_fd;
-        if( pthread_create(&thread, NULL, handle_request, (void *)req) == 0 ){
-            plog("Created thread: %p", thread);
-        } else {
+        if( pthread_create(&thread, NULL, handle_request, req_fd) != 0 ){
             plog("Could not create thread, continue non-threaded...");
-            handle_request((void *)req);
+            handle_request(req_fd);
         }
         free(addr);
         free(length_ptr);
@@ -77,7 +71,6 @@ int main(int argc, const char * argv[])
         return EXIT_FAILURE;
     };
     plog("Socket released");
-
     return EXIT_SUCCESS;
 }
 
@@ -86,13 +79,13 @@ int main(int argc, const char * argv[])
   */
 
 void * handle_request(void * args){
-    struct request_t * req = (struct request_t *)args;
+    int * fd = (int *)args;
     int run = 1;
     int ptr = 0;
     ssize_t got_bytes = 0;
     char * buf = malloc(BUFFER_SIZE);
     while( run ) {
-        got_bytes = read( req->fd, buf + ptr, BUFFER_SIZE - ptr);
+        got_bytes = read( *fd, buf + ptr, BUFFER_SIZE - ptr);
         if(got_bytes <= 0){
             buf[ptr] = 0; // Terminate string
             break;
@@ -103,22 +96,30 @@ void * handle_request(void * args){
         }
     }
     
+    struct request_t * req = malloc(sizeof(struct request_t));
+    req->fd = *fd;
+    req->selector = buf;
+    req->selector_len = strlen(req->selector);
+    req->path = resolve_selector(NULL, req->selector);
+    req->path_len = strlen(req->path);
+    
     plog("Request: %s", buf);
     
-    if( is_menu(buf) ) {
+    if( is_menu( req ) ) {
         plog("Sending menu");
         print_message(req->fd, "Welcome to Gophd!");
-        print_directory(req->fd, buf);
-    } else if ( is_file(buf) ) {
+        print_directory(req);
+    } else if ( is_file( req ) ) {
         plog("Sending file");
-        print_file(req->fd, buf);
-    } else if ( is_dir(buf) ) {
+        print_file(req);
+    } else if ( is_dir( req ) ) {
         plog("Sending dir");
-        print_directory(req->fd, buf);
+        print_directory(req);
     }
     
     close_socket(req->fd, 1);
-    free(buf);
+    free(req->selector);
+    free(req->path);
     free(args);
     pthread_exit(NULL);
 }
@@ -134,44 +135,26 @@ void * handle_request(void * args){
  */
 
 char * resolve_selector( char * filepath, const char * selector ){
-    unsigned int start_at = selector[0] == '/' ? 1 : 0;
-    //if( selector[0] == '/' ) start_at = 1;
-    asprintf(&filepath, "%s/%s", GOPHER_ROOT, selector+start_at);
+    asprintf(&filepath, "%s/%s", GOPHER_ROOT, selector + (selector[0] == '/' ? 1 : 0));
     return filepath;
 }
 
-
-
-
-int is_menu(const char * selector){
-    if( strlen(selector) == 0 ) return 1;
-    return 0;
+int is_menu(struct request_t * req){
+    return req->selector_len == 0;
 }
 
-int is_file(const char * selector){
-    char * path = resolve_selector(NULL, selector);
+int is_file(struct request_t * req){
     struct stat * fstat = malloc(sizeof(struct stat));
-    int success = stat(path, fstat) == 0 && S_ISREG(fstat->st_mode);
+    int success = stat(req->path, fstat) == 0 && S_ISREG(fstat->st_mode);
     free(fstat);
-    free(path);
     return success;
 }
 
-int is_dir(const char * selector){
-    char * path = resolve_selector(NULL, selector);
+int is_dir(struct request_t * req){
     struct stat * fstat = malloc(sizeof(struct stat));
-    int success = 0;
-    success = stat(path, fstat) == 0 && S_ISDIR(fstat->st_mode);
+    int success = stat(req->path, fstat) == 0 && S_ISDIR(fstat->st_mode);
     free(fstat);
-    free(path);
     return success;
-}
-
-/** Send stub menu
- */
-
-void print_menu_item(int fd, menu_item * item){
-    dprintf(fd, "%c%s\t%s\t%s\t%d%s", item->type, item->display, item->selector, item->host, item->port, CRLF);
 }
 
 
@@ -193,14 +176,11 @@ enum item_types resolve_item(struct dirent * entry){
     return type;
 }
 
-/** Read directory items
- *  and return array of dirents
- * 
+/** Print functions
  */
 
-void print_directory(int fd, const char * selector){
-    char * dirname = resolve_selector(NULL, selector);
-    DIR * dir = opendir(dirname);
+void print_directory(struct request_t * req){
+    DIR * dir = opendir(req->path);
     struct dirent * entry = NULL;
     
     if (dir == NULL){
@@ -212,29 +192,22 @@ void print_directory(int fd, const char * selector){
         if( (*entry).d_name[0] == '.' ) continue; // don't print hidden files/dirs
             
         char type = resolve_item(entry);
-        
         char * sel = NULL;
-        asprintf(&sel, "%s/%s", selector, entry->d_name);
+        asprintf(&sel, "%s/%s", req->selector, entry->d_name);
         
         menu_item * item = menu_item_new(type, entry->d_name, sel, DEFAULT_HOST, DEFAULT_PORT);
-        print_menu_item(fd, item);
+        print_menu_item(req->fd, item);
         menu_item_free(item);
         free(sel);
     }
     
-    print_closing(fd);
+    print_closing(req->fd);
     if( closedir(dir) != 0 )
         perror(NULL);
-    free(dirname);
 }
 
-/** Read a file and print it line by line to the server
- *  This functions read the while file at once ... we should do that block by block
- */
-
-void print_file(int fd, const char * selector){
-    char * filename = resolve_selector(NULL, selector);
-    FILE * file = fopen(filename, "rb");
+void print_file(struct request_t * req){
+    FILE * file = fopen(req->path, "rb");
     
     if (file != NULL) {
         fseek(file, 0L, SEEK_END);     /* Position to end of file */
@@ -243,24 +216,22 @@ void print_file(int fd, const char * selector){
         
         char * lineptr = malloc(file_len);
         if (fread(lineptr, file_len, 1, file) == 1) {
-            write(fd, lineptr, file_len);
+            write(req->fd, lineptr, file_len);
         }
 
         // perror(NULL);
         free(lineptr);
         fclose(file);
     }
-    free(filename);
 }
 
-
-/** Print informational message
-  */
+void print_menu_item(int fd, menu_item * item){
+    dprintf(fd, "%c%s\t%s\t%s\t%d%s", item->type, item->display, item->selector, item->host, item->port, CRLF);
+}
 
 void print_message(int fd, const char * message){
     dprintf(fd, "i%s%s", message, CRLF);
 }
-
 
 void print_closing(int fd){
     dprintf(fd, ".%s", CRLF);
