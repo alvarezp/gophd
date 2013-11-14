@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <errno.h>
 
 #include "utils.h"
 #include "types.h"
@@ -20,7 +22,7 @@
 #define CRLF "\r\n"
 #define DEFAULT_HOST "localhost"
 #define DEFAULT_PORT 70
-#define GOPHER_ROOT "/Users/louis77/"
+#define GOPHER_ROOT "/Users/louis/"
 
 char * resolve_selector( char * filepath, const char * selector );
 enum item_types resolve_item(struct dirent * entry);
@@ -33,6 +35,11 @@ void print_file(int fd, const char * filename);
 void print_message(int fd, const char * message);
 void print_closing(int fd);
 void main_shutdown();
+void * handle_request(void * args);
+
+struct request_t {
+    int fd;
+};
 
 int main(int argc, const char * argv[])
 {
@@ -48,50 +55,21 @@ int main(int argc, const char * argv[])
     struct sockaddr *addr = NULL;
     socklen_t *length_ptr = NULL;
     
-    char * buf = malloc(BUFFER_SIZE);
     atexit(&main_shutdown);
     
     while( (accept_fd = accept(fd, addr, length_ptr)) != -1 ) {
-        // Need to read the address here
-        // we must switch this to non-blocking read
-        int run = 1;
-        int ptr = 0;
-        ssize_t got_bytes = 0;
-    
-        while( run ) {
-            got_bytes = read(accept_fd, buf + ptr, BUFFER_SIZE - ptr);
-            if(got_bytes <= 0){
-                buf[ptr] = 0; // Terminate string
-                break;
-            }
-            ptr += got_bytes;
-            if( get_line(buf, ptr) ){
-                break;
-            }
+        pthread_t thread;
+        struct request_t * req = malloc(sizeof(struct request_t));
+        req->fd = accept_fd;
+        if( pthread_create(&thread, NULL, handle_request, (void *)req) == 0 ){
+            plog("Created thread: %p", thread);
+        } else {
+            plog("Could not create thread, continue non-threaded...");
+            handle_request((void *)req);
         }
-
-        plog("Request: %s", buf);
-        
-        // this is for development only
-        if(strcmp(buf, "/exit") == 0)
-            break;
-
-        if( is_menu(buf) ) {
-            plog("Sending menu");
-            print_message(accept_fd, "Welcome to Gophd!");
-            print_directory(accept_fd, buf);
-        } else if ( is_file(buf) ) {
-            plog("Sending file");
-            print_file(accept_fd, buf);
-        } else if ( is_dir(buf) ) {
-            plog("Sending dir");
-            print_directory(accept_fd, buf);
-        }
-
-        close_socket(accept_fd, 1);
-        
+        free(addr);
+        free(length_ptr);
     }
-    free(buf);
     
     // End server
     if( end_server(fd) < 0 ) {
@@ -99,9 +77,51 @@ int main(int argc, const char * argv[])
         return EXIT_FAILURE;
     };
     plog("Socket released");
+
     return EXIT_SUCCESS;
 }
 
+
+/** Handle a request, thread-safe
+  */
+
+void * handle_request(void * args){
+    struct request_t * req = (struct request_t *)args;
+    int run = 1;
+    int ptr = 0;
+    ssize_t got_bytes = 0;
+    char * buf = malloc(BUFFER_SIZE);
+    while( run ) {
+        got_bytes = read( req->fd, buf + ptr, BUFFER_SIZE - ptr);
+        if(got_bytes <= 0){
+            buf[ptr] = 0; // Terminate string
+            break;
+        }
+        ptr += got_bytes;
+        if( get_line(buf, ptr) ){
+            break;
+        }
+    }
+    
+    plog("Request: %s", buf);
+    
+    if( is_menu(buf) ) {
+        plog("Sending menu");
+        print_message(req->fd, "Welcome to Gophd!");
+        print_directory(req->fd, buf);
+    } else if ( is_file(buf) ) {
+        plog("Sending file");
+        print_file(req->fd, buf);
+    } else if ( is_dir(buf) ) {
+        plog("Sending dir");
+        print_directory(req->fd, buf);
+    }
+    
+    close_socket(req->fd, 1);
+    free(buf);
+    free(args);
+    pthread_exit(NULL);
+}
 
 /** Resolve selector string to Filesystem path
  *  Uses GOPHER_ROOT as base directory
@@ -114,12 +134,9 @@ int main(int argc, const char * argv[])
  */
 
 char * resolve_selector( char * filepath, const char * selector ){
-    size_t len = strlen(GOPHER_ROOT) + strlen(selector) + 3;  // two more bytes for slashes and \0
-    if( filepath == NULL ) filepath = malloc(len);
-    
-    unsigned int start_at = 0;
-    if( selector[0] == '/' ) start_at = 1;
-    asprintf(&filepath, "%s%s", GOPHER_ROOT, selector+start_at);
+    unsigned int start_at = selector[0] == '/' ? 1 : 0;
+    //if( selector[0] == '/' ) start_at = 1;
+    asprintf(&filepath, "%s/%s", GOPHER_ROOT, selector+start_at);
     return filepath;
 }
 
@@ -164,6 +181,8 @@ enum item_types resolve_item(struct dirent * entry){
         case DT_REG:
             if( str_ends_with(entry->d_name, ".zip") ) {
                 type = ITEM_ARCHIVE;
+            } else if ( str_ends_with(entry->d_name, ".jpg" ) || str_ends_with(entry->d_name, ".png")) {
+                type = ITEM_IMAGE;
             } else {
                 type = ITEM_FILE; // text file?
             }
@@ -194,13 +213,13 @@ void print_directory(int fd, const char * selector){
             
         char type = resolve_item(entry);
         
-        char *sel;
+        char * sel = NULL;
         asprintf(&sel, "%s/%s", selector, entry->d_name);
         
         menu_item * item = menu_item_new(type, entry->d_name, sel, DEFAULT_HOST, DEFAULT_PORT);
         print_menu_item(fd, item);
         menu_item_free(item);
-        
+        free(sel);
     }
     
     print_closing(fd);
@@ -226,8 +245,8 @@ void print_file(int fd, const char * selector){
         if (fread(lineptr, file_len, 1, file) == 1) {
             write(fd, lineptr, file_len);
         }
-    
-        perror(NULL);
+
+        // perror(NULL);
         free(lineptr);
         fclose(file);
     }
@@ -251,5 +270,6 @@ void print_closing(int fd){
  */
 
 void main_shutdown(){
+    pthread_exit(NULL);
     plog("Program ended.");
 }

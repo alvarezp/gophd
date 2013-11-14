@@ -7,7 +7,7 @@ enum item_types { ITEM_FILE='0', ITEM_DIR='1', ERROR='3', ITEM_ARCHIVE='5', ITEM
 struct menu_item {
     char type;
     char display[80];
-    char * selector;
+    char selector[256];
     char host[256];
     unsigned int port;
     char delimiter;
@@ -16,7 +16,6 @@ struct menu_item {
 typedef struct menu_item menu_item;
 typedef char t_item;
 
-struct menu_item * menu_item_new(const char type, const char * display, char * selector, const char * host, unsigned int port);
-void menu_item_free(menu_item * item);
+struct menu_item * menu_item_new(const char type, const char * display, const char * selector, const char * host, unsigned int port);void menu_item_free(menu_item * item);
 
 #endif
