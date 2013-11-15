@@ -6,6 +6,10 @@
 #include <string.h>
 #include "server.h"
 
+void catch_sigpipe(int sig){
+    printf("Broken pipe, continue...");
+}
+
 /** Creates a listening socket on port PORT and returns the file descriptor.
  *
  *  Input parameters:
@@ -18,6 +22,8 @@
 
 int start_server(unsigned int port, unsigned int queue_size ){
     int fd = 0;
+    
+    signal(SIGPIPE, catch_sigpipe);
     
     // Create a socket
     fd = socket( PF_INET, SOCK_STREAM, 0 );

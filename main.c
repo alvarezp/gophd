@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <errno.h>
+#include <signal.h>
 
 #include "utils.h"
 #include "types.h"
@@ -135,7 +136,7 @@ void * handle_request(void * args){
  */
 
 char * resolve_selector( char * filepath, const char * selector ){
-    asprintf(&filepath, "%s/%s", GOPHER_ROOT, selector + (selector[0] == '/' ? 1 : 0));
+    asprintf(&filepath, "%s%s", GOPHER_ROOT, selector + (selector[0] == '/' ? 1 : 0));
     return filepath;
 }
 
@@ -164,8 +165,14 @@ enum item_types resolve_item(struct dirent * entry){
         case DT_REG:
             if( str_ends_with(entry->d_name, ".zip") ) {
                 type = ITEM_ARCHIVE;
-            } else if ( str_ends_with(entry->d_name, ".jpg" ) || str_ends_with(entry->d_name, ".png")) {
+            } else if ( str_ends_with(entry->d_name, ".jpg" )) {
                 type = ITEM_IMAGE;
+            } else if ( str_ends_with(entry->d_name, ".png" )) {
+                type = ITEM_PNG;
+            } else if ( str_ends_with(entry->d_name, ".pdf" )) {
+                type = ITEM_PDF;
+            } else if ( str_ends_with(entry->d_name, ".gif" )) {
+                type = ITEM_GIF;
             } else {
                 type = ITEM_FILE; // text file?
             }
@@ -216,10 +223,10 @@ void print_file(struct request_t * req){
         
         char * lineptr = malloc(file_len);
         if (fread(lineptr, file_len, 1, file) == 1) {
-            write(req->fd, lineptr, file_len);
+            send(req->fd, lineptr, file_len, 0);
         }
 
-        // perror(NULL);
+        perror(NULL);
         free(lineptr);
         fclose(file);
     }

@@ -1,7 +1,19 @@
 #ifndef gophd_types_h
 #define gophd_types_h
 
-enum item_types { ITEM_FILE='0', ITEM_DIR='1', ERROR='3', ITEM_ARCHIVE='5', ITEM_BINARY='9', ITEM_IMAGE='I', ITEM_INFO='i', NO_ITEM=0 };
+enum item_types {
+    ITEM_FILE='0',
+    ITEM_DIR='1',
+    ERROR='3',
+    ITEM_ARCHIVE='5',
+    ITEM_BINARY='9',
+    ITEM_IMAGE='I',
+    ITEM_INFO='i',
+    ITEM_GIF='g',
+    ITEM_PNG='p',
+    ITEM_PDF='d',
+    NO_ITEM=0
+};
 
 
 struct menu_item {
