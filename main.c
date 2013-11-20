@@ -114,8 +114,6 @@ void * handle_request(void * args){
         struct menu_item ** items;
         int item_count = parse_gophermap( "filepath", items );
         print_menu_item( req->fd, items[0] );
-        
-
     } else if ( is_file( req ) ) {
         plog("Sending file");
         print_file(req);
