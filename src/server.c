@@ -4,6 +4,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <string.h>
+#include <signal.h>
 #include "server.h"
 
 void catch_sigpipe(int sig){
