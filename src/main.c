@@ -3,13 +3,12 @@
 #include <string.h>
 #include <errno.h>
 #include <syslog.h>
-#include <dirent.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <netinet/in.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <errno.h>
+#include <dirent.h>
 #include <signal.h>
 
 #include "utils.h"
@@ -25,12 +24,11 @@
 #define DEFAULT_HOST "localhost"
 #define DEFAULT_PORT 70
 #define GOPHER_ROOT "/Users/louis/"
+#define GOPHERMAP_FILENAME "Gophermap"
 
 char * resolve_selector( char * filepath, const char * selector );
 enum item_types resolve_item(struct dirent * entry);
 int is_menu(struct request_t * req);
-int is_file(struct request_t * req);
-int is_dir(struct request_t * req);
 void print_menu_item(int fd, menu_item * item);
 void print_directory(struct request_t * req);
 void print_file(struct request_t * req);
@@ -108,16 +106,20 @@ void * handle_request(void * args){
     plog("Request: %s", buf);
     
     if( is_menu( req ) ) {
-        plog("Sending menu2");
-        print_message(req->fd, "Welcome to Gophd!");
-        //print_directory(req);
-        struct menu_item ** items;
-        int item_count = parse_gophermap( "filepath", items );
-        print_menu_item( req->fd, items[0] );
-    } else if ( is_file( req ) ) {
+        char * gopherfile;
+        asprintf(&gopherfile, "%s%s", req->path, GOPHERMAP_FILENAME);
+        plog("Sending menu @ %s", gopherfile);
+        menu_item * items[1024];
+        int item_count = parse_gophermap( gopherfile, items, DEFAULT_HOST, DEFAULT_PORT );
+        plog("Gophermap parsed, items: %u", item_count);
+        for( int i = 0; i < item_count; i++ ){
+            print_menu_item( req->fd, items[i] );
+        }
+        free( gopherfile) ;
+    } else if ( is_file( req->path ) ) {
         plog("Sending file");
         print_file(req);
-    } else if ( is_dir( req ) ) {
+    } else if ( is_dir( req->path ) ) {
         plog("Sending dir");
         print_directory(req);
     }
@@ -145,23 +147,21 @@ char * resolve_selector( char * filepath, const char * selector ){
 }
 
 int is_menu(struct request_t * req){
-    return req->selector_len == 0;
-}
+    int success = 0;
 
-int is_file(struct request_t * req){
-    struct stat * fstat = malloc(sizeof(struct stat));
-    int success = stat(req->path, fstat) == 0 && S_ISREG(fstat->st_mode);
-    free(fstat);
+    if ( is_dir(req->path) ){
+        char * gopherfile = malloc( sizeof(char)*(req->path_len+strlen(GOPHERMAP_FILENAME)+2) );
+
+        strcat(gopherfile, req->path);
+        if ( req->path[req->path_len-1] != '/' )
+            strcat(gopherfile, "/");
+        strcat(gopherfile, GOPHERMAP_FILENAME);
+
+        success = exists(gopherfile);
+        free(gopherfile);
+    }
     return success;
 }
-
-int is_dir(struct request_t * req){
-    struct stat * fstat = malloc(sizeof(struct stat));
-    int success = stat(req->path, fstat) == 0 && S_ISDIR(fstat->st_mode);
-    free(fstat);
-    return success;
-}
-
 
 enum item_types resolve_item(struct dirent * entry){
     enum item_types type;

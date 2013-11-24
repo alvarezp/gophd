@@ -37,6 +37,7 @@ typedef struct menu_item menu_item;
 typedef char t_item;
 
 struct menu_item * menu_item_new(const char type, const char * display, const char * selector, const char * host, unsigned int port);
+struct menu_item * menu_item_parse( char type, char * line, char * default_host, unsigned int default_port );
 void menu_item_free(menu_item * item);
 
 #endif

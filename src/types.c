@@ -8,13 +8,41 @@ struct menu_item * menu_item_new(const char type, const char * display, const ch
     menu_item * item = calloc(1, sizeof(menu_item));
     
     item->type = type;
-    item->display = strdup(display);
-    item->selector = strdup(selector);
-    item->host = strdup(host);
+    item->display = display ? strdup(display) : "";
+    item->selector = selector ? strdup(selector) : "";
+    item->host = host ? strdup(host) : "";
     item->port = port;
-    item->delimiter = ITEM_DELIM;
     return item;
 }
+
+
+struct menu_item * menu_item_parse( char type, char * line, char * default_host, unsigned int default_port ){
+    char * display = NULL;
+    char * selector = NULL;
+    char * host = NULL;
+    unsigned int port = 0;
+    unsigned int tokenc = 0;
+    char * token = NULL;
+
+    // Cut out trailing newline
+    size_t line_len = strlen(line);
+    if ( line[line_len-1] == '\n' ) line[line_len-1] = '\0';
+    
+    token = strtok( line, "\t" );
+    while( token != NULL ){
+        tokenc++;
+        if( !display ) display = token;
+        else if( !selector ) selector = token;
+        else if( !host ) host = token;
+        else if( !port ) port = atoi(token); 
+        token = strtok( NULL, "\t" );
+    } 
+    if ( !host ) host = default_host;
+    if ( !port ) port = default_port; 
+
+    return menu_item_new( type, display, selector, host, port );
+}
+
 
 
 void menu_item_free(menu_item * item){
