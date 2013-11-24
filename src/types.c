@@ -16,13 +16,14 @@ struct menu_item * menu_item_new(const char type, const char * display, const ch
 }
 
 
-struct menu_item * menu_item_parse( char type, char * line, char * default_host, unsigned int default_port ){
+struct menu_item * menu_item_parse( char type, char * origline, char * default_host, unsigned int default_port ){
     char * display = NULL;
     char * selector = NULL;
     char * host = NULL;
     unsigned int port = 0;
     unsigned int tokenc = 0;
     char * token = NULL;
+    char * line = strdup(origline);
 
     // Cut out trailing newline
     size_t line_len = strlen(line);
@@ -37,9 +38,11 @@ struct menu_item * menu_item_parse( char type, char * line, char * default_host,
         else if( !port ) port = atoi(token); 
         token = strtok( NULL, "\t" );
     } 
-    if ( !host ) host = default_host;
-    if ( !port ) port = default_port; 
-
+    if (type != ITEM_INFO && type != ERROR){
+        if ( !host ) host = default_host;
+        if ( !port ) port = default_port;
+    }
+    free(line);
     return menu_item_new( type, display, selector, host, port );
 }
 

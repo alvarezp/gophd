@@ -47,16 +47,19 @@ static bool is_valid_gopher_line( const char * line )
 
 unsigned int parse_gophermap( const char * filepath, menu_item * items[], char * def_host, unsigned int def_port )
 {
-    char * line = malloc(sizeof(char)*GM_MAX_LINESIZE+1);
+    char * line = NULL;
+    size_t maxlen = 0;
     unsigned int linec = 0;
     FILE * mapf = fopen( filepath, "r" );
     if( !mapf ) return 0; // Error, return zero items
-    for( linec = 0; fgets( line, GM_MAX_LINESIZE, mapf ); linec++ ){
-    	char type = is_valid_gopher_line(line) ? line++[0] : 'i';
-    	printf("Line %c%2u: %s", type, linec, line);
-    	items[linec] = menu_item_parse( type, line, def_host, def_port );
+    for( linec = 0; getline( &line, &maxlen, mapf ) != -1; linec++ ){
+        if ( is_valid_gopher_line(line) ){
+            items[linec] = menu_item_parse( line[0], line+1, def_host, def_port );
+        } else {
+            items[linec] = menu_item_parse( 'i', line, def_host, def_port );
+        }
     }
-    
+
     fclose(mapf);
     return linec;
 }
