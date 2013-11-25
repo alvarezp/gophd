@@ -110,7 +110,7 @@ void * handle_request(void * args){
         asprintf(&gopherfile, "%s%s", req->path, GOPHERMAP_FILENAME);
         plog("Sending menu @ %s", gopherfile);
         menu_item * items[1024];
-        int item_count = parse_gophermap( gopherfile, items, DEFAULT_HOST, DEFAULT_PORT );
+        int item_count = parse_gophermap( gopherfile, &items[0], DEFAULT_HOST, DEFAULT_PORT );
         plog("Gophermap parsed, items: %u", item_count);
         for( int i = 0; i < item_count; i++ ){
             print_menu_item( req->fd, items[i] );

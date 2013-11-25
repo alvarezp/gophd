@@ -1,3 +1,4 @@
+
 #include <stdlib.h>
 #include <string.h>
 #include "types.h"
@@ -24,7 +25,8 @@ struct menu_item * menu_item_parse( char type, char * origline, char * default_h
     unsigned int tokenc = 0;
     char * token = NULL;
     char * line = strdup(origline);
-
+    menu_item * item;
+    
     // Cut out trailing newline
     size_t line_len = strlen(line);
     if ( line[line_len-1] == '\n' ) line[line_len-1] = '\0';
@@ -42,8 +44,9 @@ struct menu_item * menu_item_parse( char type, char * origline, char * default_h
         if ( !host ) host = default_host;
         if ( !port ) port = default_port;
     }
+    item = menu_item_new( type, display, selector, host, port );
     free(line);
-    return menu_item_new( type, display, selector, host, port );
+    return item;
 }
 
 

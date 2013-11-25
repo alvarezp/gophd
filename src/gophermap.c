@@ -45,7 +45,7 @@ static bool is_valid_gopher_line( const char * line )
  * 4. If HOST oder PORT is missing, add default host and port
  */
 
-unsigned int parse_gophermap( const char * filepath, menu_item * items[], char * def_host, unsigned int def_port )
+unsigned int parse_gophermap( const char * filepath, menu_item ** items, char * def_host, unsigned int def_port )
 {
     char * line = NULL;
     size_t maxlen = 0;
