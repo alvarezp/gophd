@@ -154,7 +154,7 @@ int is_menu(struct request_t * req){
     if ( is_dir(req->path) ){
         char * gopherfile = malloc( sizeof(char)*(req->path_len+strlen(GOPHERMAP_FILENAME)+2) );
 
-        strcat(gopherfile, req->path);
+        strcpy(gopherfile, req->path);
         if ( req->path[req->path_len-1] != '/' )
             strcat(gopherfile, "/");
         strcat(gopherfile, GOPHERMAP_FILENAME);
